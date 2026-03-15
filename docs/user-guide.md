@@ -298,7 +298,7 @@ No manual intervention is needed.
 
 | GPIO | Header pin | Signal | Direction | Description |
 |------|-----------|--------|-----------|-------------|
-| 8  | 24 | SPI0_CE0 | Output (SPI) | MCP2518FD chip-select (HAT docs call this "CE1" — 1-based numbering) |
+| 7  | 26 | SPI0_CE1 | Output (SPI) | MCP2518FD chip-select (Linux CE1, `spi0.1`) |
 | 9  | 21 | SPI0_MISO | Input (SPI) | MCP2518FD data out |
 | 10 | 19 | SPI0_MOSI | Output (SPI) | MCP2518FD data in |
 | 11 | 23 | SPI0_SCLK | Output (SPI) | MCP2518FD clock |

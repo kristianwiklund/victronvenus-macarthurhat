@@ -68,7 +68,7 @@ repository.
 | MOSI | 10 | 19 | SPI0 data to MCP2518FD |
 | MISO | 9  | 21 | SPI0 data from MCP2518FD |
 | SCLK | 11 | 23 | SPI0 clock |
-| nCS  | 8  | 24 | Chip-select (CE0, active-low). HAT docs call this "CE1" using 1-based numbering; Linux uses 0-based, so this is `spi0.0` / `reg = <0>`. |
+| nCS  | 7  | 26 | Chip-select CE1 (active-low). Linux `spi0.1`, `reg = <1>`. Confirmed by OpenPlotter CAN configurator source: "SPI0 CE1" → `spi0-1`. |
 | INT  | 25 | 22 | MCP2518FD interrupt (active-low) |
 
 The MCP2518FD is clocked from a **20 MHz** crystal (Y1, 18 pF load) on the
@@ -78,10 +78,10 @@ The chip is also pin-compatible with the MCP2517FD.
 The kernel driver `mcp251xfd` manages the device and exposes it as a
 standard Linux SocketCAN network interface (`can0`).
 
-> **Common confusion:** The HAT's own documentation and OpenPlotter label
-> this interface "SPI0 CE1" using 1-based CE numbering.  Linux numbers chip
-> selects from 0, so GPIO8 = CE0 = `spi0.0`.  Do **not** change `reg` to
-> `<1>` — that would target GPIO7 which is unconnected.
+> **CE numbering:** The HAT documentation and OpenPlotter both say "SPI0 CE1".
+> The OpenPlotter CAN configurator maps "SPI0 CE1" → `spi0-1` (Linux CE1,
+> GPIO7, `reg = <1>`).  This is standard Linux 0-based CE numbering.  CE0
+> (GPIO8) is unconnected to the MCP2518FD.
 
 ### 3.2 Power management GPIO
 

@@ -11,9 +11,9 @@
  *   SPI0 MOSI   GPIO10 (pin 19)
  *   SPI0 MISO   GPIO9  (pin 21)
  *   SPI0 SCLK   GPIO11 (pin 23)
- *   nCS         GPIO8  (pin 24) = SPI0 CE0 (Linux spi0.0)
- *                                 NOTE: HAT documentation calls this "CE1"
- *                                 using 1-based numbering; Linux uses 0-based.
+ *   nCS         GPIO7  (pin 26) = SPI0 CE1 (Linux spi0.1, reg=<1>)
+ *                                 Confirmed by OpenPlotter CAN configurator
+ *                                 source: "SPI0 CE1" → spi0-1 → CE1 → GPIO7
  *   INT         GPIO25 (pin 22) = active-low interrupt from MCP2518FD
  *   Crystal Y1  20 MHz, 18 pF load capacitance
  *
@@ -36,9 +36,9 @@
         };
     };
 
-    /* 2 – Disable the stock spidev on CE0 so mcp251xfd can claim it */
+    /* 2 – Disable the stock spidev on CE1 so mcp251xfd can claim it */
     fragment@1 {
-        target = <&spidev0>;
+        target = <&spidev1>;
         __overlay__ {
             status = "disabled";
         };
@@ -63,9 +63,9 @@
             #address-cells = <1>;
             #size-cells    = <0>;
 
-            mcp2518fd: mcp2518fd@0 {
+            mcp2518fd: mcp2518fd@1 {
                 compatible        = "microchip,mcp2518fd";
-                reg               = <0>;            /* CE0 = GPIO8 */
+                reg               = <1>;            /* CE1 = GPIO7 */
                 clocks            = <&mcp2518fd_osc>;
                 interrupt-parent  = <&gpio>;
                 interrupts        = <25 8>;         /* GPIO25, IRQ_TYPE_LEVEL_LOW */
