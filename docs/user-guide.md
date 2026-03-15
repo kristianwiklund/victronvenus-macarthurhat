@@ -14,7 +14,7 @@ This package makes the HAT work:
 
 | Capability | How |
 |---|---|
-| NMEA2000 CAN bus | Loads an MCP2515 driver overlay; udev brings up `can0` at 250 kbit/s |
+| NMEA2000 CAN bus | Loads an MCP2518FD driver overlay; udev brings up `can0` at 250 kbit/s |
 | GPIO pin directions | Overlay sets GPIO21 (shutdown input) and GPIO26 (power-hold output) |
 | Graceful shutdown | Daemon holds the DC-DC converter on and cuts power only after a clean shutdown |
 | Survives VenusOS updates | SetupHelper reinstalls the package automatically after a firmware update |
@@ -94,15 +94,58 @@ stops and removes the `MacArthurShutdown` service.
 
 ## NMEA2000 integration in VenusOS
 
-This package makes the MCP2515 hardware work at the kernel level and brings
-up `can0` at 250 kbit/s.  To see NMEA2000 devices (chart plotters, tank
-senders, GPS, etc.) in the VenusOS device list and on the VRM portal you
-also need to configure the VeCAN dBus service.
+This package makes the MCP2518FD hardware work at the kernel level and brings
+up `can0` at 250 kbit/s.  There are two ways to get NMEA 2000 device data
+into the VenusOS GUI.
 
-**Recommended:** install [VeCanSetup](https://github.com/kwindrem/VeCanSetup)
-alongside this package.  When you add a new HAT interface in VeCanSetup,
-select `can0` and set the profile to **NMEA2000**.  VeCanSetup will configure
-the `vecan-dbus` service to bridge NMEA2000 PGNs to the Victron dBus.
+### Option A – vecan-dbus via VeCanSetup (normal path)
+
+Install [VeCanSetup](https://github.com/kwindrem/VeCanSetup) alongside this
+package.  When you add a new HAT interface in VeCanSetup, select `can0` and
+set the profile to **NMEA2000**.  VeCanSetup will configure the `vecan-dbus`
+service to bridge NMEA2000 PGNs to the Victron dBus.
+
+**Use this option if your CAN transceiver can transmit.**
+
+### Option B – MacArthurN2K dbus bridge (TX-impaired workaround)
+
+The MacArthur HAT's CAN transceiver TX path may be faulty.  Symptoms:
+
+- `can0` receives frames fine (`candump can0` shows traffic).
+- After any transmission attempt the RX error counter climbs to
+  ERROR-PASSIVE (≥ 128) and most frames are subsequently dropped.
+- `vecan-dbus` (from VeCanSetup) never shows NMEA 2000 devices — it must
+  complete address claiming (which requires TX) before registering devices.
+
+**Root cause:** `vecan-dbus` performs NMEA 2000 address claiming on startup.
+The address claim is sent and acknowledged, but the bus degrades immediately
+afterwards — almost certainly a CAN transceiver TX path issue on the HAT
+(possible causes: missing termination resistor, STBY pin held in the wrong
+state, or a faulty transceiver IC).
+
+The optional `MacArthurN2K` service is a workaround that reads raw frames in
+**listen-only** mode (zero bus participation) and publishes device data
+directly to the VenusOS dbus, bypassing address claiming entirely.
+
+To enable it, run setup and answer **Yes** to the prompt:
+
+```bash
+/data/MacArthurVenusSetup/setup
+# → "Enable NMEA 2000 dbus bridge (workaround for CAN TX issues)?"
+```
+
+Currently published to dbus:
+
+| NMEA 2000 PGN | Data | VenusOS service name |
+|---|---|---|
+| 127505 Fluid Level | Fuel type, level %, capacity | `com.victronenergy.tank.N2K_can0_<sa>_<inst>` |
+
+Tank sensors appear in the VenusOS device list immediately after the service
+starts (no reboot required).  Service logs are at
+`/service/MacArthurN2K/log/main/current`.
+
+If the TX path is repaired later, run setup again, answer **No** to the
+bridge prompt, and configure VeCanSetup instead.
 
 ---
 
@@ -228,7 +271,7 @@ cat /sys/class/gpio/gpio21/value
 4. Check for MCP2518FD kernel messages:
    ```bash
    dmesg | grep -i mcp
-   # look for: mcp251xfd spi0.0: MCP2518FD rev0.x successfully initialized
+   # look for: mcp251xfd spi0.1: MCP2518FD rev0.x successfully initialized
    ```
 
 ### `MacArthurShutdown` service is not up
@@ -261,6 +304,41 @@ If the RPi shuts down but the HAT does not cut 12 V:
    ```
 2. Check the service log for the `GPIO26 (DCDC_EN) → LOW` message.
 3. Verify HAT wiring: GPIO26 is on pin 37 of the 40-pin header.
+
+### NMEA 2000 devices not appearing (vecan-dbus TX issue)
+
+If `candump can0` shows frames but VeCanSetup / vecan-dbus never lists any
+NMEA 2000 devices, the CAN transceiver TX path is likely faulty.
+
+Confirm by checking the error counters immediately after vecan-dbus starts:
+
+```bash
+ip -details -statistics link show can0
+# look for: RX errors climbing to 128+ (ERROR-PASSIVE) after vecan-dbus start
+```
+
+If the RX error counter climbs after any TX attempt, enable the MacArthurN2K
+dbus bridge instead (see [Option B above](#option-b--macarthurn2k-dbus-bridge-tx-impaired-workaround)):
+
+```bash
+/data/MacArthurVenusSetup/setup
+# Answer "Yes" to the N2K bridge prompt
+```
+
+### MacArthurN2K service not starting
+
+```bash
+svstat /service/MacArthurN2K
+cat /service/MacArthurN2K/log/main/current
+```
+
+If it shows `down` with a `down` file present, the bridge is intentionally
+disabled.  Run setup and answer **Yes** to enable it.
+
+If it is failing (rapid respawn), common causes:
+- `velib_python` not found: check `/opt/victronenergy/dbus-systemcalc-py/ext/velib_python/`
+- `can0` interface not up yet: verify `ip link show can0`
+- dbus not accessible: check `dbus-send --system --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.ListNames`
 
 ### Spurious reboots / shutdowns
 

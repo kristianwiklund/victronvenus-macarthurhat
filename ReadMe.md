@@ -15,11 +15,12 @@ by Kevin Windrem.
 
 | Component | Detail |
 |---|---|
-| `macarthur-can.dtbo` | Device-tree overlay for MCP2515 on SPI0 CE0 (GPIO8), 16 MHz oscillator, IRQ on GPIO25 |
+| `macarthur-can.dtbo` | Device-tree overlay for MCP2518FD on SPI0 CE1 (GPIO7), 20 MHz oscillator, IRQ on GPIO25 |
 | `macarthur-gpio.dtbo` | Device-tree overlay configuring GPIO26 as output (DCDC_EN) and GPIO21 as pull-up input (SHUTDOWN_REQ) |
 | `/u-boot/config.txt` entries | Enables SPI0 and loads both overlays at boot |
-| `/etc/udev/rules.d/42-macarthur.rules` | Brings up `can0` at 250 kbit/s (NMEA2000) when the MCP2515 interface appears |
+| `/etc/udev/rules.d/42-macarthur.rules` | Brings up `can0` at 250 kbit/s (NMEA2000) when the MCP2518FD interface appears |
 | `MacArthurShutdown` s6 service | Shutdown monitor daemon (see below) |
+| `MacArthurN2K` s6 service | Optional NMEA 2000 → dbus bridge (see below); ships disabled by default |
 
 ---
 
@@ -29,8 +30,8 @@ by Kevin Windrem.
 |---|---|---|---|
 | GPIO26 | 37 | Output | **DCDC_EN** – held HIGH by the RPi to keep the HAT's DC-DC converter enabled. Driven LOW after graceful shutdown so the HAT may safely cut 12 V supply. |
 | GPIO21 | 40 | Input (pull-up) | **SHUTDOWN_REQ** – the HAT drives this LOW (e.g. on loss of 12 V) to request a graceful shutdown. |
-| GPIO25 | 22 | Input | MCP2515 interrupt (wired to CAN controller, handled by kernel driver) |
-| GPIO8  | 24 | SPI CE0 | MCP2515 SPI chip-select |
+| GPIO25 | 22 | Input | MCP2518FD interrupt (wired to CAN controller, handled by kernel driver) |
+| GPIO7  | 26 | SPI CE1 | MCP2518FD SPI chip-select (Linux `spi0.1`) |
 
 ---
 
@@ -52,14 +53,51 @@ by Kevin Windrem.
 
 ## CAN / NMEA2000
 
-The MCP2515 driver creates a standard Linux SocketCAN interface (`can0`).
-The udev rule brings it up at **250 kbit/s** with automatic bus-off recovery.
+The `mcp251xfd` kernel driver creates a standard Linux SocketCAN interface
+(`can0`).  The udev rule brings it up at **250 kbit/s** with automatic
+bus-off recovery.
+
+### vecan-dbus (normal path)
 
 For full NMEA2000 integration in the VenusOS GUI (device list, tank/GPS
 data) you can additionally install
 [VeCanSetup](https://github.com/kwindrem/VeCanSetup) and configure `can0`
 as an NMEA2000 port.  This package ensures the hardware is working so
 VeCanSetup can detect and use it.
+
+> **Known hardware limitation – CAN TX path:** The MCP2518FD transceiver
+> on the MacArthur HAT can **receive** on the NMEA 2000 bus without errors,
+> but any transmission attempt causes the RX error counter to climb to
+> ERROR-PASSIVE (≥ 128), after which most subsequent frames are dropped.
+> Root cause is a CAN transceiver TX path issue on the HAT (likely a
+> termination or STBY-pin problem).
+>
+> `vecan-dbus` requires completing NMEA 2000 address claiming (which
+> involves TX) before it will register any discovered devices.  If your
+> transceiver has this issue, devices will never appear through vecan-dbus.
+
+### MacArthurN2K dbus bridge (TX-impaired workaround)
+
+The optional `MacArthurN2K` service (`src/dbus_n2k.py`) provides a
+workaround.  It opens a raw SocketCAN socket in **LISTEN-ONLY** mode (zero
+bus participation) and publishes discovered NMEA 2000 devices directly to
+the VenusOS dbus without ever transmitting on the bus.
+
+Currently decoded PGNs:
+
+| PGN | Description | VenusOS service |
+|-----|-------------|-----------------|
+| 127505 | Fluid Level | `com.victronenergy.tank.N2K_can0_<sa>_<inst>` |
+
+The service ships **disabled** (a `down` file is present).  To enable it,
+run `setup` and answer **Yes** to the N2K bridge prompt:
+
+```
+Enable NMEA 2000 dbus bridge (workaround for CAN TX issues)?
+```
+
+If the TX path is later repaired (transceiver swap, termination fix),
+disable the bridge via the same prompt and configure VeCanSetup instead.
 
 ---
 
@@ -128,10 +166,16 @@ MacArthurVenusSetup/
 ├── udev/
 │   └── 42-macarthur.rules       CAN interface bringup udev rule
 ├── services/
-│   └── MacArthurShutdown/
+│   ├── MacArthurShutdown/
+│   │   ├── run                  s6 service run script (rewritten at install)
+│   │   └── log/
+│   │       └── run              s6 log service (svlogd)
+│   └── MacArthurN2K/
 │       ├── run                  s6 service run script (rewritten at install)
+│       ├── down                 Present = service disabled (default)
 │       └── log/
 │           └── run              s6 log service (svlogd)
 └── src/
-    └── shutdown_monitor.py      Shutdown monitor daemon
+    ├── shutdown_monitor.py      Shutdown monitor daemon
+    └── dbus_n2k.py              NMEA 2000 → VenusOS dbus bridge
 ```

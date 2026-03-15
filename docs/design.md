@@ -17,7 +17,7 @@ architecture, and the reasoning behind key design decisions.
 │  Raspberry Pi running VenusOS                            │
 │                                                          │
 │  ┌─────────────┐   SocketCAN    ┌──────────────────┐    │
-│  │  MCP2515    │◄──────────────►│  can0 netdev     │    │
+│  │  MCP2518FD  │◄──────────────►│  can0 netdev     │    │
 │  │  (on HAT)   │   kernel drv   │  250 kbit/s      │    │
 │  └──────┬──────┘                └──────────────────┘    │
 │  SPI0   │  GPIO25(IRQ)                  │               │
@@ -119,9 +119,9 @@ Four DT fragments:
 | Fragment | Purpose |
 |----------|---------|
 | `@0` | Enable `spi0` controller |
-| `@1` | Disable the stock `spidev0` node on CE0 so the `mcp251xfd` driver can claim it |
+| `@1` | Disable the stock `spidev1` node on CE1 so the `mcp251xfd` driver can claim it |
 | `@2` | Declare a `fixed-clock` node for the 20 MHz MCP2518FD crystal oscillator |
-| `@3` | Register the `mcp2518fd` device on `spi0` at CE0 with the oscillator reference and GPIO25 interrupt |
+| `@3` | Register the `mcp2518fd` device on `spi0` at CE1 (`reg = <1>`) with the oscillator reference and GPIO25 interrupt |
 
 The interrupt is declared as `LEVEL_LOW` (`8` in the BCM2835 interrupt
 type encoding), which is required by the `mcp251xfd` driver.
@@ -284,7 +284,14 @@ setup called
      ▼
 source IncludeHelpers
      │
-     ├── scriptAction == NONE  ──► print description + standardActionPrompt
+     ├── scriptAction == NONE
+     │       │
+     │       ├── print description
+     │       ├── show current N2K bridge state (enabled/disabled)
+     │       ├── yesNoPrompt "Enable NMEA 2000 dbus bridge?"
+     │       │       ├── Yes → rm services/MacArthurN2K/down
+     │       │       └── No  → touch services/MacArthurN2K/down
+     │       └── standardActionPrompt
      │
      ├── scriptAction == INSTALL
      │       │
@@ -294,7 +301,9 @@ source IncludeHelpers
      │       ├── installOverlay "macarthur-gpio"
      │       ├── addConfigBlock  → /u-boot/config.txt
      │       ├── installUdevRules
-     │       ├── updateServiceRunScript  (embeds $scriptDir path)
+     │       ├── updateServiceRunScript  (embeds $scriptDir path in both
+     │       │                            MacArthurShutdown/run and MacArthurN2K/run)
+     │       ├── log N2K bridge state (down file present or absent)
      │       └── rebootNeeded=true
      │
      ├── scriptAction == UNINSTALL
@@ -308,8 +317,9 @@ source IncludeHelpers
      │
      └── endScript INSTALL_SERVICES
              │
-             ├── INSTALL:   installs MacArthurShutdown from $servicesDir
-             └── UNINSTALL: removes  MacArthurShutdown from /service/
+             ├── INSTALL:   installs MacArthurShutdown and MacArthurN2K
+             │              from $servicesDir (s6 respects down file)
+             └── UNINSTALL: removes both services from /service/
 ```
 
 #### `installOverlay` function
@@ -338,22 +348,112 @@ update).  `removeConfigBlock` uses `sed -i` with the begin/end markers.
 Both `/u-boot/config.txt` and `/boot/config.txt` are checked at runtime
 (the path differs between VenusOS versions).
 
+#### N2K bridge enable/disable
+
+The `MacArthurN2K` service directory ships with a `down` file, which
+instructs s6 to keep the service stopped.  During the interactive `NONE`
+phase of setup the user is prompted to enable or disable it.  The choice is
+persisted by the presence or absence of `services/MacArthurN2K/down` in the
+package directory.  On reinstall the down-file state is preserved (setup does
+not touch it during `INSTALL`), so the user's choice survives VenusOS
+firmware updates.
+
 #### Service run-script generation
 
-The `MacArthurShutdown/run` file in the repository contains a placeholder
-path.  During `INSTALL`, `updateServiceRunScript` overwrites it with the
-correct absolute path derived from `$scriptDir` (set by IncludeHelpers):
+The `MacArthurShutdown/run` and `MacArthurN2K/run` files in the repository
+contain a placeholder path (`SCRIPT_PATH_PH`).  During `INSTALL`,
+`updateServiceRunScript` overwrites them with the correct absolute path
+derived from `$scriptDir` (set by IncludeHelpers):
 
 ```bash
+# MacArthurShutdown/run
 exec /usr/bin/python3 /data/MacArthurVenusSetup/src/shutdown_monitor.py
+
+# MacArthurN2K/run
+exec /usr/bin/python3 /data/MacArthurVenusSetup/src/dbus_n2k.py
 ```
 
-`endScript INSTALL_SERVICES` then copies the rewritten service directory
-to `/service/MacArthurShutdown/`, where s6 picks it up immediately.
+`endScript INSTALL_SERVICES` then copies both service directories to
+`/service/`, where s6 picks them up immediately.  The `MacArthurN2K`
+service will only start if its `down` file is absent.
 
 This approach avoids hardcoding the package directory name in source
 control while still providing an absolute path to s6 (which does not
 inherit any shell environment).
+
+### 4.5 NMEA 2000 dbus bridge (`dbus_n2k.py`)
+
+**Installed to:** `src/dbus_n2k.py`
+**Run by:** `/service/MacArthurN2K/run`
+**Enabled by:** absence of `services/MacArthurN2K/down`
+
+#### Background: why vecan-dbus fails
+
+NMEA 2000 requires each node to perform **address claiming** before
+transmitting.  `vecan-dbus` goes through this process at startup and only
+registers discovered devices after claiming completes successfully.
+
+The MCP2518FD transceiver on the MacArthur HAT can receive frames correctly,
+but any TX attempt causes the bus error counters to climb rapidly to
+ERROR-PASSIVE (RX error count ≥ 128).  Once in error-passive mode the
+controller silences most subsequent reception.  The address claim is sent
+and acknowledged, but the bus degrades immediately afterwards — almost
+certainly a TX path issue on the transceiver (likely a missing or wrong
+termination resistor, or the STBY pin held in the wrong state).
+
+Result: vecan-dbus sends the address claim, the bus degrades, devices are
+never reliably seen, and nothing appears in the VenusOS GUI.
+
+#### Bridge architecture
+
+`dbus_n2k.py` bypasses address claiming entirely:
+
+```
+can0 (LISTEN-ONLY)
+      │  raw SocketCAN frames (SOCK_RAW, AF_CAN)
+      │
+      ▼
+  _can_reader thread
+      │  decode 29-bit NMEA 2000 / J1939 CAN ID
+      │  extract PGN + source address (SA)
+      │
+      ├── PGN 127505 → _decode_127505()
+      │       │ instance, fluid_type, level_pct, capacity_m3
+      │       ▼
+      │  GLib.idle_add(_update_tank, ...)
+      │
+      ▼
+  GLib main loop (dbus main thread)
+      │
+      ▼
+  _update_tank()
+      ├── first call: _make_tank_service() → VeDbusService.register()
+      │   → com.victronenergy.tank.N2K_can0_<sa>_<inst> on system dbus
+      └── subsequent calls: update /Level, /Capacity, /Remaining, /Status
+```
+
+The CAN reader runs in a background daemon thread.  Updates are dispatched
+to the GLib main loop via `GLib.idle_add` so that all dbus operations
+occur on the correct thread.
+
+#### VenusOS dbus service layout
+
+Each discovered tank is registered as a `com.victronenergy.tank.*` service.
+The `/DeviceInstance` is set to `20 + instance` to avoid clashing with
+VE.Can built-in device instances (0–19 are reserved by convention).
+
+| dbus path | Value |
+|-----------|-------|
+| `/FluidType` | Mapped from NMEA fluid type to VenusOS integer |
+| `/Level` | Percentage (may be negative for a faulty out-of-range sender) |
+| `/Capacity` | m³ |
+| `/Remaining` | m³ (derived: `level/100 × capacity`) |
+| `/Status` | 0 = OK, 1 = out-of-range |
+
+#### Known limitation
+
+Only PGN 127505 (Fluid Level) is currently decoded.  PGNs 127488/127489
+(Engine Parameters) are visible on the bus but not yet published to dbus.
 
 ---
 
@@ -438,7 +538,19 @@ The sysfs interface, while deprecated in mainline kernel documentation, is
 present and functional in every VenusOS kernel version and requires zero
 additional packages.
 
-### 6.4 90-second shutdown timeout
+### 6.4 N2K dbus bridge vs. waiting for a hardware fix
+
+| Option | Pro | Con |
+|--------|-----|-----|
+| Ship the bridge (chosen) | Fuel/engine data works today; no hardware rework needed | Adds a second service; only decodes a subset of PGNs; ships disabled to avoid confusion |
+| Require hardware fix first | Correct vecan-dbus path; full PGN support | Transceiver TX path issue may be non-trivial (soldering required); blocks any NMEA 2000 data in the meantime |
+| LISTEN-ONLY via VeCanSetup | Would use the existing vecan-dbus infrastructure | VeCanSetup has no listen-only mode; address claiming is hardwired into its startup path |
+
+The bridge is an opt-in workaround, not a permanent replacement.  If the
+transceiver TX path is repaired, the bridge can be disabled via `setup` and
+VeCanSetup used instead with no package changes.
+
+### 6.5 90-second shutdown timeout
 
 The timeout exists to handle the case where `shutdown -h now` is called but
 s6 never delivers `SIGTERM` to the service (e.g. the init system itself
@@ -463,20 +575,26 @@ MacArthurVenusSetup/
 ├── changes                   Changelog
 │
 ├── overlays/
-│   ├── macarthur-can.dts     DT overlay source: MCP2515 on SPI0 CE0
+│   ├── macarthur-can.dts     DT overlay source: MCP2518FD on SPI0 CE1 (GPIO7)
 │   └── macarthur-gpio.dts    DT overlay source: GPIO21 (input) + GPIO26 (output)
 │
 ├── udev/
 │   └── 42-macarthur.rules    CAN interface bringup: can0 @ 250 kbps
 │
 ├── services/
-│   └── MacArthurShutdown/
+│   ├── MacArthurShutdown/
+│   │   ├── run               s6 run script (rewritten at install time)
+│   │   └── log/
+│   │       └── run           s6 log run (svlogd → ./main/)
+│   └── MacArthurN2K/
 │       ├── run               s6 run script (rewritten at install time)
+│       ├── down              Present = service disabled (default)
 │       └── log/
 │           └── run           s6 log run (svlogd → ./main/)
 │
 ├── src/
-│   └── shutdown_monitor.py   Shutdown monitor daemon
+│   ├── shutdown_monitor.py   Shutdown monitor daemon
+│   └── dbus_n2k.py           NMEA 2000 → VenusOS dbus bridge (listen-only)
 │
 └── docs/
     ├── user-guide.md         End-user installation and operation guide

@@ -1,6 +1,14 @@
+v1.1
+  - Fix overlay: MCP2518FD (not MCP2515) on SPI0 CE1 / GPIO7 (not CE0 / GPIO8)
+  - Fix overlay: 20 MHz oscillator (not 16 MHz)
+  - Add optional NMEA 2000 dbus bridge (MacArthurN2K service / dbus_n2k.py)
+    Workaround for CAN transceiver TX path issues that prevent vecan-dbus
+    from completing address claiming. Ships disabled; enable via setup prompt.
+    Currently decodes PGN 127505 (Fluid Level) → com.victronenergy.tank.
+
 v1.0
   Initial release.
-  - MCP2515 CAN controller overlay for NMEA2000 on SPI0 CE0 / GPIO25 IRQ
+  - MCP2518FD CAN controller overlay for NMEA2000 on SPI0 CE1 / GPIO25 IRQ
   - GPIO overlay configuring GPIO21 (SHUTDOWN_REQ, pull-up input) and
     GPIO26 (DCDC_EN, output)
   - Shutdown monitor daemon: holds GPIO26 HIGH to keep DC-DC converter
