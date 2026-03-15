@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build package zip
+        run: |
+          mkdir -p dist/MacArthurVenusSetup
+          rsync -a --exclude='.git' \
+                   --exclude='.github' \
+                   --exclude='debug' \
+                   --exclude='docs' \
+                   --exclude='dist' \
+                   . dist/MacArthurVenusSetup/
+          cd dist
+          zip -r ../MacArthurVenusSetup.zip MacArthurVenusSetup
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MacArthurVenusSetup.zip
+          generate_release_notes: true
