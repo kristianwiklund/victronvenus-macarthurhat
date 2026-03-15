@@ -1,0 +1,8 @@
+#!/bin/sh
+# MacArthur HAT – Shutdown Monitor service run script
+#
+# NOTE: This file is rewritten by the 'setup' script at install time
+# to embed the correct absolute path to shutdown_monitor.py.
+# The placeholder path below is replaced automatically.
+
+exec /usr/bin/python3 /data/MacArthurVenusSetup/src/shutdown_monitor.py

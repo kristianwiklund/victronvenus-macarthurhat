@@ -1,0 +1,245 @@
+#!/bin/bash
+# MacArthur HAT setup for VenusOS
+# Compatible with SetupHelper by Kevin Windrem
+# https://github.com/kwindrem/SetupHelper
+#
+# Installs/removes:
+#   • macarthur-can.dtbo  – MCP2515 CAN controller on SPI0 CE0 (NMEA2000)
+#   • macarthur-gpio.dtbo – GPIO21 shutdown-request input & GPIO26 DCDC_EN output
+#   • /etc/udev/rules.d/42-macarthur.rules – brings up can0 at 250 kbps
+#   • MacArthurShutdown service – holds GPIO26 HIGH, drives LOW on shutdown
+#   • /u-boot/config.txt  – dtoverlay entries for the above overlays
+
+#### include SetupHelper resources ####
+source "/data/SetupHelper/HelperResources/IncludeHelpers"
+#### end SetupHelper resources ####
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers: locate boot files (path differs between VenusOS versions)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_find_config_file() {
+    if [ -f /u-boot/config.txt ]; then
+        echo /u-boot/config.txt
+    elif [ -f /boot/config.txt ]; then
+        echo /boot/config.txt
+    else
+        echo /u-boot/config.txt   # will be reported as missing
+    fi
+}
+
+_find_overlay_dir() {
+    if [ -d /u-boot/overlays ]; then
+        echo /u-boot/overlays
+    elif [ -d /boot/overlays ]; then
+        echo /boot/overlays
+    else
+        echo /u-boot/overlays   # will be reported as missing
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Overlay compilation and installation
+# ─────────────────────────────────────────────────────────────────────────────
+
+# installOverlay <name>
+#   Compiles overlays/<name>.dts → <overlayDir>/<name>.dtbo using dtc.
+#   Returns 0 on success, 1 on failure.
+installOverlay() {
+    local name="$1"
+    local overlayDir
+    overlayDir="$(_find_overlay_dir)"
+    local src="$scriptDir/overlays/${name}.dts"
+    local dst="${overlayDir}/${name}.dtbo"
+
+    if [ ! -f "$src" ]; then
+        logMessage "ERROR: overlay source not found: $src"
+        return 1
+    fi
+    if [ ! -d "$overlayDir" ]; then
+        logMessage "ERROR: overlay directory not found: $overlayDir"
+        return 1
+    fi
+    if ! command -v dtc > /dev/null 2>&1; then
+        logMessage "ERROR: dtc (device-tree compiler) not found – cannot install overlay $name"
+        return 1
+    fi
+
+    logMessage "Compiling overlay: $name"
+    if ! dtc -@ -I dts -O dtb -o "$dst" "$src" 2>/tmp/macarthur-dtc.log; then
+        logMessage "ERROR: dtc failed for $name:"
+        cat /tmp/macarthur-dtc.log | while read -r line; do logMessage "  $line"; done
+        return 1
+    fi
+    logMessage "Installed overlay: $dst"
+    return 0
+}
+
+removeOverlay() {
+    local name="$1"
+    local overlayDir
+    overlayDir="$(_find_overlay_dir)"
+    local dst="${overlayDir}/${name}.dtbo"
+    if [ -f "$dst" ]; then
+        rm -f "$dst"
+        logMessage "Removed overlay: $dst"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /u-boot/config.txt management
+# ─────────────────────────────────────────────────────────────────────────────
+
+MARKER_BEGIN="# begin MacArthurVenusSetup"
+MARKER_END="# end MacArthurVenusSetup"
+
+addConfigBlock() {
+    local configFile
+    configFile="$(_find_config_file)"
+    if [ ! -f "$configFile" ]; then
+        logMessage "ERROR: boot config file not found: $configFile"
+        return 1
+    fi
+
+    # Idempotent: remove existing block first
+    removeConfigBlock
+
+    cat >> "$configFile" << EOF
+
+$MARKER_BEGIN
+# MacArthur HAT – MCP2515 NMEA2000 CAN controller
+# SPI0 CE0 (GPIO8), 16 MHz oscillator, IRQ on GPIO25, 10 MHz SPI
+dtparam=spi=on
+dtoverlay=macarthur-can
+# MacArthur HAT – GPIO26 DCDC_EN output and GPIO21 shutdown-request input
+dtoverlay=macarthur-gpio
+$MARKER_END
+EOF
+    logMessage "Added overlay config to $configFile"
+    return 0
+}
+
+removeConfigBlock() {
+    local configFile
+    configFile="$(_find_config_file)"
+    if [ ! -f "$configFile" ]; then
+        return 0
+    fi
+    # Remove the block (including the blank line before the begin marker)
+    sed -i "/^[[:space:]]*$/{
+        N
+        /\n[[:space:]]*${MARKER_BEGIN}/d
+    }" "$configFile" 2>/dev/null
+    sed -i "/$MARKER_BEGIN/,/$MARKER_END/d" "$configFile"
+    logMessage "Removed overlay config from $configFile"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# udev rules
+# ─────────────────────────────────────────────────────────────────────────────
+
+installUdevRules() {
+    cp "$scriptDir/udev/42-macarthur.rules" /etc/udev/rules.d/
+    udevadm control --reload-rules 2>/dev/null || true
+    logMessage "Installed udev rules: /etc/udev/rules.d/42-macarthur.rules"
+}
+
+removeUdevRules() {
+    rm -f /etc/udev/rules.d/42-macarthur.rules
+    udevadm control --reload-rules 2>/dev/null || true
+    logMessage "Removed udev rules"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Service run script – embed the correct absolute path at install time
+# ─────────────────────────────────────────────────────────────────────────────
+
+updateServiceRunScript() {
+    local runScript="$scriptDir/services/MacArthurShutdown/run"
+    cat > "$runScript" << EOF
+#!/bin/sh
+# MacArthur HAT – Shutdown Monitor service (generated by setup)
+exec /usr/bin/python3 "$scriptDir/src/shutdown_monitor.py"
+EOF
+    chmod +x "$runScript"
+    chmod +x "$scriptDir/services/MacArthurShutdown/log/run"
+    chmod +x "$scriptDir/src/shutdown_monitor.py"
+    logMessage "Updated service run script with path: $scriptDir/src/shutdown_monitor.py"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Interactive prompt (scriptAction == NONE)
+# ─────────────────────────────────────────────────────────────────────────────
+
+if [ "$scriptAction" == "NONE" ]; then
+    echo ""
+    echo "MacArthur HAT Setup for VenusOS"
+    echo "================================"
+    echo ""
+    echo "This package configures the MacArthur navigation HAT:"
+    echo "  • MCP2515 CAN bus (NMEA2000) on SPI0 / GPIO25 IRQ"
+    echo "  • GPIO26 (DCDC_EN) – held HIGH to keep HAT DC-DC enabled"
+    echo "  • GPIO21 (SHUTDOWN_REQ) – graceful shutdown trigger"
+    echo "  • Shutdown monitor service"
+    echo ""
+    echo "A reboot is required for overlay changes to take effect."
+    echo ""
+    standardActionPrompt
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INSTALL
+# ─────────────────────────────────────────────────────────────────────────────
+
+if [ "$scriptAction" == "INSTALL" ]; then
+    logMessage "MacArthur HAT: starting installation from $scriptDir"
+
+    updateRootToReadWrite
+
+    # Verify we are on a Raspberry Pi with the expected overlay directory
+    overlayDir="$(_find_overlay_dir)"
+    if [ ! -d "$overlayDir" ]; then
+        logMessage "ERROR: overlay directory $overlayDir not found – is this a Raspberry Pi running VenusOS?"
+        setInstallFailed
+        exit
+    fi
+
+    # Compile and install device-tree overlays
+    installOverlay "macarthur-can"  || { setInstallFailed; exit; }
+    installOverlay "macarthur-gpio" || { setInstallFailed; exit; }
+
+    # Add dtoverlay entries to boot config
+    addConfigBlock || { setInstallFailed; exit; }
+
+    # Install udev rule for CAN interface bringup
+    installUdevRules
+
+    # Regenerate the service run script with the correct absolute path
+    updateServiceRunScript
+
+    logMessage "MacArthur HAT installation complete – reboot required"
+    rebootNeeded=true
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UNINSTALL
+# ─────────────────────────────────────────────────────────────────────────────
+
+if [ "$scriptAction" == "UNINSTALL" ]; then
+    logMessage "MacArthur HAT: starting uninstall"
+
+    updateRootToReadWrite
+
+    removeConfigBlock
+    removeOverlay "macarthur-can"
+    removeOverlay "macarthur-gpio"
+    removeUdevRules
+
+    logMessage "MacArthur HAT uninstall complete – reboot required for overlay removal"
+    rebootNeeded=true
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Finalise – installs/removes the MacArthurShutdown service and exits
+# ─────────────────────────────────────────────────────────────────────────────
+endScript INSTALL_SERVICES

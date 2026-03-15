@@ -1,0 +1,9 @@
+v1.0
+  Initial release.
+  - MCP2515 CAN controller overlay for NMEA2000 on SPI0 CE0 / GPIO25 IRQ
+  - GPIO overlay configuring GPIO21 (SHUTDOWN_REQ, pull-up input) and
+    GPIO26 (DCDC_EN, output)
+  - Shutdown monitor daemon: holds GPIO26 HIGH to keep DC-DC converter
+    enabled, drives GPIO26 LOW after graceful shutdown
+  - udev rule to bring up can0 at 250 kbps for NMEA2000
+  - SetupHelper-compatible setup/uninstall script

@@ -1,0 +1,11 @@
+# MacArthur HAT – CAN interface initialisation for NMEA2000
+#
+# When the MCP2515 socketcan interface appears, configure it for NMEA2000
+# (250 kbit/s) and bring it up.  restart-ms causes automatic bus-off
+# recovery after 100 ms, which is standard practice for NMEA2000 nodes.
+#
+# This rule fires for can0 only.  If a second CAN interface exists on the
+# system it will appear as can1 and must be configured separately.
+
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="can0", \
+    RUN+="/bin/ip link set can0 up type can bitrate 250000 restart-ms 100"

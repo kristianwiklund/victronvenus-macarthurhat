@@ -1,0 +1,36 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * MacArthur HAT – GPIO configuration overlay for VenusOS
+ *
+ * GPIO21 (pin 40) – SHUTDOWN_REQ
+ *   Input with internal pull-up.  The HAT drives this pin LOW to signal
+ *   that a graceful shutdown is requested (e.g. loss of 12 V supply).
+ *
+ * GPIO26 (pin 37) – DCDC_EN
+ *   Output.  The RPi MUST hold this pin HIGH to keep the HAT's DC-DC
+ *   converter enabled.  The shutdown monitor daemon drives it LOW only
+ *   after the filesystem has been unmounted and the system is safe to
+ *   be powered off.
+ *
+ * NOTE: GPIO26 is intentionally left without a pull resistor.  Its
+ * output value is controlled exclusively by the shutdown monitor service.
+ * At kernel init the pin direction is set to output; the service is
+ * responsible for asserting HIGH as its very first action.
+ */
+
+/ {
+    compatible = "brcm,bcm2835";
+
+    fragment@0 {
+        target = <&gpio>;
+        __overlay__ {
+            macarthur_pins: macarthur-pins {
+                brcm,pins     = <21  26>;
+                brcm,function = <0   1>;   /* 0=GPIO_IN, 1=GPIO_OUT */
+                brcm,pull     = <2   0>;   /* 2=PUD_UP,  0=PUD_OFF  */
+            };
+        };
+    };
+};

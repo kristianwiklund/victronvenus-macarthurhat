@@ -1,0 +1,71 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * MacArthur HAT – MCP2515 CAN Controller overlay for VenusOS
+ *
+ * Hardware connections:
+ *   SPI0 MOSI  GPIO10 (pin 19)
+ *   SPI0 MISO  GPIO9  (pin 21)
+ *   SPI0 SCLK  GPIO11 (pin 23)
+ *   SPI0 CE0   GPIO8  (pin 24)  ← chip-select
+ *   IRQ        GPIO25 (pin 22)  ← active-low interrupt from MCP2515
+ *   Oscillator 16 MHz crystal on HAT
+ *
+ * The overlay:
+ *   1. Enables SPI0.
+ *   2. Disables the generic spidev node on CE0 so the MCP2515 driver can claim it.
+ *   3. Declares the 16 MHz fixed clock used by the MCP2515.
+ *   4. Registers the MCP2515 device on SPI0 CE0 at 10 MHz with GPIO25 as IRQ.
+ */
+
+/ {
+    compatible = "brcm,bcm2835";
+
+    /* 1 – Enable SPI0 controller */
+    fragment@0 {
+        target = <&spi0>;
+        __overlay__ {
+            status = "okay";
+        };
+    };
+
+    /* 2 – Disable the stock spidev on CE0 */
+    fragment@1 {
+        target = <&spidev0>;
+        __overlay__ {
+            status = "disabled";
+        };
+    };
+
+    /* 3 – Fixed 16 MHz oscillator for MCP2515 */
+    fragment@2 {
+        target-path = "/clocks";
+        __overlay__ {
+            mcp2515_osc: mcp2515-osc {
+                compatible    = "fixed-clock";
+                #clock-cells  = <0>;
+                clock-frequency = <16000000>;
+            };
+        };
+    };
+
+    /* 4 – MCP2515 device on SPI0 CE0 */
+    fragment@3 {
+        target = <&spi0>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells    = <0>;
+
+            mcp2515: mcp2515@0 {
+                compatible        = "microchip,mcp2515";
+                reg               = <0>;            /* CE0 = GPIO8 */
+                spi-max-frequency = <10000000>;     /* 10 MHz */
+                clocks            = <&mcp2515_osc>;
+                interrupt-parent  = <&gpio>;
+                interrupts        = <25 2>;         /* GPIO25, EDGE_FALLING */
+                status            = "okay";
+            };
+        };
+    };
+};

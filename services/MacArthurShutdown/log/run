@@ -1,0 +1,4 @@
+#!/bin/sh
+# Capture MacArthurShutdown stdout/stderr and rotate with svlogd.
+# Logs land in ./main/ (relative to this log service directory).
+exec /usr/bin/svlogd -tt ./main
