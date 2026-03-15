@@ -159,6 +159,13 @@ EOF
     chmod +x "$scriptDir/services/MacArthurShutdown/log/run"
     chmod +x "$scriptDir/src/shutdown_monitor.py"
     logMessage "Updated service run script with path: $scriptDir/src/shutdown_monitor.py"
+
+    local n2kScript="$scriptDir/services/MacArthurN2K/run"
+    sed -i "s|SCRIPT_PATH_PH|$scriptDir/src/dbus_n2k.py|" "$n2kScript"
+    chmod +x "$n2kScript"
+    chmod +x "$scriptDir/services/MacArthurN2K/log/run"
+    chmod +x "$scriptDir/src/dbus_n2k.py"
+    logMessage "Updated N2K service run script with path: $scriptDir/src/dbus_n2k.py"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -171,10 +178,32 @@ if [ "$scriptAction" == "NONE" ]; then
     echo "================================"
     echo ""
     echo "This package configures the MacArthur navigation HAT:"
-    echo "  • MCP2515 CAN bus (NMEA2000) on SPI0 / GPIO25 IRQ"
+    echo "  • MCP2518FD CAN bus (NMEA 2000) on SPI0 CE1 / GPIO25 IRQ"
     echo "  • GPIO26 (DCDC_EN) – held HIGH to keep HAT DC-DC enabled"
     echo "  • GPIO21 (SHUTDOWN_REQ) – graceful shutdown trigger"
     echo "  • Shutdown monitor service"
+    echo ""
+    echo "Optional: NMEA 2000 dbus bridge"
+    echo "  If the CAN transceiver cannot transmit (TX path issue), vecan-dbus"
+    echo "  cannot complete address claiming and will not show NMEA 2000 devices."
+    echo "  The N2K dbus bridge bypasses this by reading raw frames in listen-only"
+    echo "  mode and publishing directly to dbus.  Fuel tank, engine, etc. will"
+    echo "  appear in VenusOS without any CAN bus transmission."
+    echo ""
+    if [ -f "$scriptDir/services/MacArthurN2K/down" ]; then
+        echo "  N2K dbus bridge: DISABLED (down file present)"
+    else
+        echo "  N2K dbus bridge: ENABLED"
+    fi
+    echo ""
+    yesNoPrompt "Enable NMEA 2000 dbus bridge (workaround for CAN TX issues)? "
+    if $yesResponse ; then
+        rm -f "$scriptDir/services/MacArthurN2K/down"
+        echo "  → N2K bridge ENABLED"
+    else
+        touch "$scriptDir/services/MacArthurN2K/down"
+        echo "  → N2K bridge DISABLED"
+    fi
     echo ""
     echo "A reboot is required for overlay changes to take effect."
     echo ""
@@ -208,8 +237,15 @@ if [ "$scriptAction" == "INSTALL" ]; then
     # Install udev rule for CAN interface bringup
     installUdevRules
 
-    # Regenerate the service run script with the correct absolute path
+    # Regenerate the service run scripts with the correct absolute path
     updateServiceRunScript
+
+    # Log N2K bridge state
+    if [ -f "$scriptDir/services/MacArthurN2K/down" ]; then
+        logMessage "N2K dbus bridge: disabled (down file present – run setup to enable)"
+    else
+        logMessage "N2K dbus bridge: enabled"
+    fi
 
     logMessage "MacArthur HAT installation complete – reboot required"
     rebootNeeded=true
