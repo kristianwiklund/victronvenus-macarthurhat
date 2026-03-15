@@ -17,6 +17,7 @@ This package makes the HAT work:
 | NMEA2000 CAN bus | Loads an MCP2518FD driver overlay; udev brings up `can0` at 250 kbit/s |
 | GPIO pin directions | Overlay sets GPIO21 (shutdown input) and GPIO26 (power-hold output) |
 | Graceful shutdown | Daemon holds the DC-DC converter on and cuts power only after a clean shutdown |
+| NMEA 2000 → VenusOS dbus bridge | Optional `MacArthurN2K` service reads raw CAN frames in listen-only mode and publishes tank levels (and future PGNs) to the VenusOS dbus — no TX required |
 | Survives VenusOS updates | SetupHelper reinstalls the package automatically after a firmware update |
 
 ---
@@ -28,6 +29,15 @@ This package makes the HAT work:
 SetupHelper must be installed and running.  Follow the instructions at
 https://github.com/kwindrem/SetupHelper.  Once installed, its files live in
 `/data/SetupHelper/` and the PackageManager service runs in the background.
+
+### 2 – Hardware
+
+Supported platforms:
+
+| Platform | Notes |
+|----------|-------|
+| Raspberry Pi 4 | Fully tested |
+| Raspberry Pi 5 | SPI0 and GPIO assignments are identical; UART numbering changes (UART2/4 → UART3/5) but this package does not use UARTs — no changes needed |
 
 ---
 
@@ -68,7 +78,7 @@ https://github.com/kwindrem/SetupHelper.  Once installed, its files live in
 1. Create a zip archive of the package directory.
 2. Copy the zip to a USB stick or SD card (FAT32 or ext4).
 3. With SetupHelper installed, plug the media into the Venus device.
-4. PackageManager detects the archive and offers installation in the GUI.
+4. PackageManager detects the archive automatically when `AUTO_INSTALL_PACKAGES` is set, or you can trigger installation from the PackageManager GUI.
 
 ### Option C – PackageManager GUI
 

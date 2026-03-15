@@ -4,12 +4,18 @@
 
 High receive error count (REC) on the MCP2518FD after transmission attempts. Other devices on the bus operate normally. The bus is correctly terminated (2× 120 Ω), STBY is tied to GND on the transceiver, and all other CAN nodes remain healthy.
 
+> **Note:** Component identities below are taken from the
+> [OpenMarine/MacArthur-HAT](https://github.com/OpenMarine/MacArthur-HAT)
+> KiCad schematics and have not been independently verified against the
+> physical board.  If your board has a different transceiver the specific
+> voltage levels and propagation delay figures will differ.
+
 ## Hardware Configuration
 
 | Component | Part |
 |-----------|------|
-| CAN FD controller | MCP2518FD |
-| CAN transceiver | MCP2562 (non-FD) |
+| CAN FD controller | MCP2518FD (per schematic) |
+| CAN transceiver | MCP2562 (non-FD, per schematic) |
 | Crystal | 20 MHz |
 | SPI | spi0.1 (GPIO7 / CE1) |
 | Interrupt | GPIO25 |
