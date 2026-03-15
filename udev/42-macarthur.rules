@@ -1,11 +1,20 @@
-# MacArthur HAT – CAN interface initialisation for NMEA2000
+# MacArthur HAT – CAN interface configuration for NMEA2000
 #
-# When the MCP2515 socketcan interface appears, configure it for NMEA2000
-# (250 kbit/s) and bring it up.  restart-ms causes automatic bus-off
-# recovery after 100 ms, which is standard practice for NMEA2000 nodes.
+# Matches the MCP2518FD by its SPI bus path (spi0.1 = SPI0 CE1 = GPIO7)
+# rather than by interface name, so the rule is stable if Venus OS renames
+# the interface (e.g. to vecan0 or can8).
 #
-# This rule fires for can0 only.  If a second CAN interface exists on the
-# system it will appear as can1 and must be configured separately.
+# LISTEN-ONLY mode: the MCP2518FD is configured as a passive bus observer.
+# In normal CAN mode the node must ACK every received frame and may transmit
+# active error flags.  On a live NMEA2000 bus this drove the rx error counter
+# to the ERROR-PASSIVE threshold (128), causing the node to repeatedly enter
+# the error-passive state and miss the majority of bus traffic.  Listen-only
+# mode eliminates ACK transmission and error flag generation, dropping the
+# rx error counter to 0 and restoring full frame reception.
+#
+# If you need to TRANSMIT on the NMEA2000 bus (e.g. for waypoint commands),
+# remove "listen-only on" from the ip link command below and investigate the
+# bus termination / transceiver hardware before enabling normal mode.
 
-ACTION=="add", SUBSYSTEM=="net", KERNEL=="can0", \
-    RUN+="/bin/ip link set can0 up type can bitrate 250000 restart-ms 100"
+ACTION=="add", SUBSYSTEM=="net", KERNELS=="spi0.1", \
+    RUN+="/sbin/ip link set %k up type can bitrate 250000 listen-only on restart-ms 100"

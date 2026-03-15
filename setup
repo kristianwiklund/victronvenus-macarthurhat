@@ -100,8 +100,8 @@ addConfigBlock() {
     cat >> "$configFile" << EOF
 
 $MARKER_BEGIN
-# MacArthur HAT – MCP2515 NMEA2000 CAN controller
-# SPI0 CE0 (GPIO8), 16 MHz oscillator, IRQ on GPIO25, 10 MHz SPI
+# MacArthur HAT – MCP2518FD NMEA2000 CAN controller
+# SPI0 CE1 (GPIO7), 20 MHz oscillator, IRQ on GPIO25, 10 MHz SPI
 dtparam=spi=on
 dtoverlay=macarthur-can
 # MacArthur HAT – GPIO26 DCDC_EN output and GPIO21 shutdown-request input
@@ -118,12 +118,13 @@ removeConfigBlock() {
     if [ ! -f "$configFile" ]; then
         return 0
     fi
-    # Remove the block (including the blank line before the begin marker)
-    sed -i "/^[[:space:]]*$/{
-        N
-        /\n[[:space:]]*${MARKER_BEGIN}/d
-    }" "$configFile" 2>/dev/null
+    # Remove properly-marked blocks (begin … end)
     sed -i "/$MARKER_BEGIN/,/$MARKER_END/d" "$configFile"
+    # Also remove any orphaned blocks that start with the HAT comment header
+    # but are missing their begin marker (left by earlier package versions)
+    sed -i "/# MacArthur HAT/,/$MARKER_END/d" "$configFile"
+    # Remove any stray end markers left behind
+    sed -i "/$MARKER_END/d" "$configFile"
     logMessage "Removed overlay config from $configFile"
 }
 
