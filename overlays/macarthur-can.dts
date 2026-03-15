@@ -2,21 +2,27 @@
 /plugin/;
 
 /*
- * MacArthur HAT – MCP2515 CAN Controller overlay for VenusOS
+ * MacArthur HAT – MCP2518FD CAN-FD Controller overlay for VenusOS
  *
- * Hardware connections:
- *   SPI0 MOSI  GPIO10 (pin 19)
- *   SPI0 MISO  GPIO9  (pin 21)
- *   SPI0 SCLK  GPIO11 (pin 23)
- *   SPI0 CE0   GPIO8  (pin 24)  ← chip-select
- *   IRQ        GPIO25 (pin 22)  ← active-low interrupt from MCP2515
- *   Oscillator 16 MHz crystal on HAT
+ * Source of truth: KiCad schematic
+ *   https://github.com/OpenMarine/MacArthur-HAT/tree/main/KiCad
  *
- * The overlay:
- *   1. Enables SPI0.
- *   2. Disables the generic spidev node on CE0 so the MCP2515 driver can claim it.
- *   3. Declares the 16 MHz fixed clock used by the MCP2515.
- *   4. Registers the MCP2515 device on SPI0 CE0 at 10 MHz with GPIO25 as IRQ.
+ * Hardware connections (verified from schematic):
+ *   SPI0 MOSI   GPIO10 (pin 19)
+ *   SPI0 MISO   GPIO9  (pin 21)
+ *   SPI0 SCLK   GPIO11 (pin 23)
+ *   nCS         GPIO8  (pin 24) = SPI0 CE0 (Linux spi0.0)
+ *                                 NOTE: HAT documentation calls this "CE1"
+ *                                 using 1-based numbering; Linux uses 0-based.
+ *   INT         GPIO25 (pin 22) = active-low interrupt from MCP2518FD
+ *   Crystal Y1  20 MHz, 18 pF load capacitance
+ *
+ * Driver: mcp251xfd  (NOT mcp251x / mcp2515 – those are a different chip)
+ * Chip:   MCP2518FD  – also pin-compatible with MCP2517FD
+ * CAN:    Used at 250 kbit/s classical CAN for NMEA2000 (no CAN-FD frames)
+ *
+ * SPI clock: 10 MHz  (MCP2518FD max = 0.85 × 20 MHz = 17 MHz)
+ * IRQ type:  level-low (required by the mcp251xfd driver)
  */
 
 / {
@@ -30,7 +36,7 @@
         };
     };
 
-    /* 2 – Disable the stock spidev on CE0 */
+    /* 2 – Disable the stock spidev on CE0 so mcp251xfd can claim it */
     fragment@1 {
         target = <&spidev0>;
         __overlay__ {
@@ -38,32 +44,32 @@
         };
     };
 
-    /* 3 – Fixed 16 MHz oscillator for MCP2515 */
+    /* 3 – 20 MHz fixed clock for the MCP2518FD oscillator */
     fragment@2 {
         target-path = "/clocks";
         __overlay__ {
-            mcp2515_osc: mcp2515-osc {
-                compatible    = "fixed-clock";
-                #clock-cells  = <0>;
-                clock-frequency = <16000000>;
+            mcp2518fd_osc: mcp2518fd-osc {
+                compatible      = "fixed-clock";
+                #clock-cells    = <0>;
+                clock-frequency = <20000000>;
             };
         };
     };
 
-    /* 4 – MCP2515 device on SPI0 CE0 */
+    /* 4 – MCP2518FD device on SPI0 CE0 */
     fragment@3 {
         target = <&spi0>;
         __overlay__ {
             #address-cells = <1>;
             #size-cells    = <0>;
 
-            mcp2515: mcp2515@0 {
-                compatible        = "microchip,mcp2515";
+            mcp2518fd: mcp2518fd@0 {
+                compatible        = "microchip,mcp2518fd";
                 reg               = <0>;            /* CE0 = GPIO8 */
-                spi-max-frequency = <10000000>;     /* 10 MHz */
-                clocks            = <&mcp2515_osc>;
+                clocks            = <&mcp2518fd_osc>;
                 interrupt-parent  = <&gpio>;
-                interrupts        = <25 2>;         /* GPIO25, EDGE_FALLING */
+                interrupts        = <25 8>;         /* GPIO25, IRQ_TYPE_LEVEL_LOW */
+                spi-max-frequency = <10000000>;     /* 10 MHz */
                 status            = "okay";
             };
         };

@@ -56,26 +56,32 @@ architecture, and the reasoning behind key design decisions.
 
 ## 3. Hardware model
 
-### 3.1 MCP2515 CAN controller
+### 3.1 MCP2518FD CAN-FD controller
 
-The MacArthur HAT connects a Microchip MCP2515 standalone CAN controller
-to the RPi via SPI0.
+The MacArthur HAT connects a Microchip MCP2518FD CAN-FD controller to the
+RPi via SPI0.  This was verified from the KiCad schematic in the
+[OpenMarine/MacArthur-HAT](https://github.com/OpenMarine/MacArthur-HAT)
+repository.
 
 | Signal | GPIO | RPi pin | Notes |
 |--------|------|---------|-------|
-| MOSI | 10 | 19 | SPI0 data to MCP2515 |
-| MISO | 9  | 21 | SPI0 data from MCP2515 |
+| MOSI | 10 | 19 | SPI0 data to MCP2518FD |
+| MISO | 9  | 21 | SPI0 data from MCP2518FD |
 | SCLK | 11 | 23 | SPI0 clock |
-| CE0  | 8  | 24 | Chip-select (active-low) |
-| IRQ  | 25 | 22 | MCP2515 interrupt (active-low) |
+| nCS  | 8  | 24 | Chip-select (CE0, active-low). HAT docs call this "CE1" using 1-based numbering; Linux uses 0-based, so this is `spi0.0` / `reg = <0>`. |
+| INT  | 25 | 22 | MCP2518FD interrupt (active-low) |
 
-The MCP2515 is clocked from a 16 MHz crystal on the HAT.  SPI clock is
-10 MHz (well within the MCP2515's 10 MHz maximum and the HAT PCB's
-capabilities).
+The MCP2518FD is clocked from a **20 MHz** crystal (Y1, 18 pF load) on the
+HAT.  SPI clock is 10 MHz (MCP2518FD maximum is 0.85 × 20 MHz = 17 MHz).
+The chip is also pin-compatible with the MCP2517FD.
 
-The kernel driver `mcp251x` (part of the `can` subsystem) manages the
-device and exposes it as a standard Linux SocketCAN network interface
-(`can0`).
+The kernel driver `mcp251xfd` manages the device and exposes it as a
+standard Linux SocketCAN network interface (`can0`).
+
+> **Common confusion:** The HAT's own documentation and OpenPlotter label
+> this interface "SPI0 CE1" using 1-based CE numbering.  Linux numbers chip
+> selects from 0, so GPIO8 = CE0 = `spi0.0`.  Do **not** change `reg` to
+> `<1>` — that would target GPIO7 which is unconnected.
 
 ### 3.2 Power management GPIO
 
@@ -113,14 +119,12 @@ Four DT fragments:
 | Fragment | Purpose |
 |----------|---------|
 | `@0` | Enable `spi0` controller |
-| `@1` | Disable the stock `spidev0` node on CE0 so the `mcp251x` driver can claim it |
-| `@2` | Declare a `fixed-clock` node for the 16 MHz MCP2515 oscillator |
-| `@3` | Register the `mcp2515` device on `spi0` at CE0 with the oscillator reference and GPIO25 interrupt |
+| `@1` | Disable the stock `spidev0` node on CE0 so the `mcp251xfd` driver can claim it |
+| `@2` | Declare a `fixed-clock` node for the 20 MHz MCP2518FD crystal oscillator |
+| `@3` | Register the `mcp2518fd` device on `spi0` at CE0 with the oscillator reference and GPIO25 interrupt |
 
-The interrupt is declared as `EDGE_FALLING` (`2` in the BCM2835 interrupt
-type encoding).  The `mcp251x` driver clears the MCP2515 interrupt flag
-inside the IRQ handler so edge-triggered is correct and avoids spurious
-re-entry.
+The interrupt is declared as `LEVEL_LOW` (`8` in the BCM2835 interrupt
+type encoding), which is required by the `mcp251xfd` driver.
 
 **Why not the stock `mcp2515-can0` overlay?**
 VenusOS is built with Buildroot and ships only the overlays explicitly

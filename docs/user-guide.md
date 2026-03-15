@@ -225,10 +225,10 @@ cat /sys/class/gpio/gpio21/value
    ls /dev/spi*   # should show /dev/spidev0.0 or similar
    ```
    If missing, check that `dtparam=spi=on` is in `config.txt`.
-4. Check for MCP2515 kernel messages:
+4. Check for MCP2518FD kernel messages:
    ```bash
    dmesg | grep -i mcp
-   # look for: mcp251x spi0.0: MCP2515 successfully initialized
+   # look for: mcp251xfd spi0.0: MCP2518FD rev0.x successfully initialized
    ```
 
 ### `MacArthurShutdown` service is not up
@@ -298,10 +298,10 @@ No manual intervention is needed.
 
 | GPIO | Header pin | Signal | Direction | Description |
 |------|-----------|--------|-----------|-------------|
-| 8  | 24 | SPI0_CE0 | Output (SPI) | MCP2515 chip-select |
-| 9  | 21 | SPI0_MISO | Input (SPI) | MCP2515 data out |
-| 10 | 19 | SPI0_MOSI | Output (SPI) | MCP2515 data in |
-| 11 | 23 | SPI0_SCLK | Output (SPI) | MCP2515 clock |
+| 8  | 24 | SPI0_CE0 | Output (SPI) | MCP2518FD chip-select (HAT docs call this "CE1" — 1-based numbering) |
+| 9  | 21 | SPI0_MISO | Input (SPI) | MCP2518FD data out |
+| 10 | 19 | SPI0_MOSI | Output (SPI) | MCP2518FD data in |
+| 11 | 23 | SPI0_SCLK | Output (SPI) | MCP2518FD clock |
 | 21 | 40 | SHUTDOWN_REQ | Input (pull-up) | HAT drives LOW to request shutdown |
-| 25 | 22 | CAN_IRQ | Input | MCP2515 interrupt (active-low) |
+| 25 | 22 | CAN_IRQ | Input | MCP2518FD interrupt (active-low, level) |
 | 26 | 37 | DCDC_EN | Output | RPi holds HIGH; drive LOW after shutdown |
