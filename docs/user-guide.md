@@ -29,21 +29,6 @@ SetupHelper must be installed and running.  Follow the instructions at
 https://github.com/kwindrem/SetupHelper.  Once installed, its files live in
 `/data/SetupHelper/` and the PackageManager service runs in the background.
 
-### 2 – `dtc` (device-tree compiler)
-
-The setup script compiles the overlay source files (`.dts → .dtbo`) at
-install time.  `dtc` is included in most VenusOS builds; verify with:
-
-```bash
-dtc --version
-```
-
-If it is missing, install it with:
-
-```bash
-opkg update && opkg install dtc
-```
-
 ---
 
 ## Installation

@@ -39,38 +39,31 @@ _find_overlay_dir() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Overlay compilation and installation
+# Overlay installation
+# Pre-compiled .dtbo binaries are shipped with the package (same approach as
+# VeCanSetup). No on-device compiler required.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # installOverlay <name>
-#   Compiles overlays/<name>.dts → <overlayDir>/<name>.dtbo using dtc.
+#   Copies overlays/<name>.dtbo → <overlayDir>/<name>.dtbo.
 #   Returns 0 on success, 1 on failure.
 installOverlay() {
     local name="$1"
     local overlayDir
     overlayDir="$(_find_overlay_dir)"
-    local src="$scriptDir/overlays/${name}.dts"
+    local src="$scriptDir/overlays/${name}.dtbo"
     local dst="${overlayDir}/${name}.dtbo"
 
     if [ ! -f "$src" ]; then
-        logMessage "ERROR: overlay source not found: $src"
+        logMessage "ERROR: pre-compiled overlay not found: $src"
         return 1
     fi
     if [ ! -d "$overlayDir" ]; then
         logMessage "ERROR: overlay directory not found: $overlayDir"
         return 1
     fi
-    if ! command -v dtc > /dev/null 2>&1; then
-        logMessage "ERROR: dtc (device-tree compiler) not found – cannot install overlay $name"
-        return 1
-    fi
 
-    logMessage "Compiling overlay: $name"
-    if ! dtc -@ -I dts -O dtb -o "$dst" "$src" 2>/tmp/macarthur-dtc.log; then
-        logMessage "ERROR: dtc failed for $name:"
-        cat /tmp/macarthur-dtc.log | while read -r line; do logMessage "  $line"; done
-        return 1
-    fi
+    updateActiveFile "$src" "$dst"
     logMessage "Installed overlay: $dst"
     return 0
 }

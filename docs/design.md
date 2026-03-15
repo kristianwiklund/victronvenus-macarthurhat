@@ -125,7 +125,7 @@ re-entry.
 **Why not the stock `mcp2515-can0` overlay?**
 VenusOS is built with Buildroot and ships only the overlays explicitly
 included by Victron.  Relying on a stock RPi firmware overlay would make
-the package fragile.  Shipping and compiling the source ourselves is the
+the package fragile.  Shipping our own pre-compiled `.dtbo` binary is the
 same approach taken by VeCanSetup.
 
 #### `macarthur-gpio.dtbo`
@@ -310,10 +310,10 @@ source IncludeHelpers
 
 #### `installOverlay` function
 
-Calls `dtc -@ -I dts -O dtb -o <dst>.dtbo <src>.dts`.  The `-@` flag
-preserves labels and fixup symbols needed for overlay application at
-boot.  Errors from `dtc` are captured and forwarded to the SetupHelper
-log via `logMessage`.
+Calls `updateActiveFile "$src.dtbo" "$dst.dtbo"` to copy the pre-compiled
+binary shipped with the package into the boot overlay directory.  No
+on-device compiler is required.  This matches the approach used by
+VeCanSetup.
 
 #### `/u-boot/config.txt` management
 
@@ -414,11 +414,14 @@ well.
 
 | Option | Pro | Con |
 |--------|-----|-----|
-| Ship pre-built `.dtbo` | No dependency on `dtc` | Binary might mismatch kernel version; hard to audit in git |
-| Compile on device (chosen) | Always matches the running kernel's DT format; auditable source | Requires `dtc` to be present |
+| Ship pre-built `.dtbo` (chosen) | No dependency on `dtc`; zero install-time build step; matches VeCanSetup's approach | Binary committed to git; must be rebuilt when DTS source changes |
+| Compile on device | Always matches the running kernel's DT format | `dtc` is not present on VenusOS by default |
 
-`dtc` is present in all tested VenusOS builds.  The source-compile approach
-is also used by VeCanSetup.
+VenusOS does not ship `dtc`.  Pre-compiling the overlays on a development
+machine and committing the `.dtbo` binaries alongside the `.dts` sources is
+the same pattern used by VeCanSetup.  The `.dts` source files remain in the
+repository for auditability; the rule is: **edit the `.dts`, recompile,
+commit both**.
 
 ### 6.3 sysfs GPIO vs. libgpiod for the shutdown monitor
 

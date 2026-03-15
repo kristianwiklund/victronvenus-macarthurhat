@@ -68,8 +68,6 @@ VeCanSetup can detect and use it.
 * Raspberry Pi 4 (or Pi 5 – see note below) running VenusOS ≥ v2.90
 * [SetupHelper](https://github.com/kwindrem/SetupHelper) installed in
   `/data/SetupHelper/`
-* `dtc` (device-tree compiler) available on the device
-  (`opkg install dtc` or already present in most VenusOS builds)
 
 ### Raspberry Pi 5 note
 
