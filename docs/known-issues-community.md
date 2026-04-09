@@ -56,10 +56,24 @@ fuel flow.
 - Does **not** confirm correct CAN-level operation: no `candump` output, TEC/REC
   counter checks, or bus error logs were published. The Axiom may tolerate
   frames with elevated error counts that would be rejected by stricter nodes.
-- The data source is WiFi, not a CAN RX node — so this scenario does not
-  exercise the RXD loopback path implicated in the hardware TX bug documented in
-  `docs/tx-troubleshooting.md`. Whether that bug affects this setup at low TX
-  rates is unknown.
+- The data source is WiFi, not a CAN RX node — so the RXD loopback path is only
+  exercised during ACK transmission of received frames, not during data TX.
+
+**Why this TX may work when others report TX failure:**
+
+The v1.2 schematic includes a level-shifting circuit (U9/74LVC1G125 +
+U10/74AHCT1G125) specifically designed to bridge the 5 V MCP2562 and the
+3.3 V MCP2518FD. Two signal paths exist, selected by 0 Ω resistors:
+
+- **Direct path** (R29/R30/R31 populated, U9/U10 bypassed): 5 V RXD hits the
+  MCP2518FD RXCAN directly → loopback errors → TX fails.
+- **Level-shifted path** (R33/R35 populated, U9/U10 fitted): signals are
+  translated to the correct voltage before reaching each IC → TX should work.
+
+The Baileys board may have the level-shifted path correctly populated. Boards
+where TX fails likely have the direct path active. Neither state has been
+independently verified against a physical board. See `docs/tx-troubleshooting.md`
+for the full analysis and physical verification steps.
 
 **Plugins required:**
 
@@ -87,13 +101,17 @@ Requires `openplotter-can` ≥ v4.0.4 and OpenPlotter 4.
 ### RX vs TX
 
 All confirmed RX reports involve the HAT passively reading from the NMEA 2000
-bus. The one TX report (Boating With The Baileys) uses the HAT to retransmit
-data that originated from a WiFi-connected ESP32 sensor node — it does not
-involve reading from the CAN bus and re-transmitting. No community report
-includes low-level verification (candump, TEC/REC counters) of CAN TX health.
+bus. The one TX report (Boating With The Baileys) has not been verified at the
+CAN layer (no candump, TEC/REC counter logs).
 
-Software-level TX failures unrelated to hardware are common — see Issues 3, 7,
-and 8. For the hardware TX root cause see `docs/tx-troubleshooting.md`.
+Whether TX works on a given board depends on which signal path the 0 Ω
+resistors select: the direct path (R29/R30/R31) causes voltage mismatch and TX
+failure; the level-shifted path (R33/R35 with U9/U10 fitted) should work. The
+schematic designs for the latter, but assembly may vary. See
+`docs/tx-troubleshooting.md` for verification steps.
+
+Software-level TX failures unrelated to hardware are also common — see Issues
+3, 7, and 8.
 
 ---
 

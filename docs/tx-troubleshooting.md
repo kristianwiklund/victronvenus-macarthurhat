@@ -4,11 +4,12 @@
 
 High receive error count (REC) on the MCP2518FD after transmission attempts. Other devices on the bus operate normally. The bus is correctly terminated (2× 120 Ω), STBY is tied to GND on the transceiver, and all other CAN nodes remain healthy.
 
-> **Note:** Component identities below are taken from the
-> [OpenMarine/MacArthur-HAT](https://github.com/OpenMarine/MacArthur-HAT)
-> KiCad schematics and have not been independently verified against the
-> physical board.  If your board has a different transceiver the specific
-> voltage levels and propagation delay figures will differ.
+> **Note:** The analysis below is based on the v1.2 schematic (2024-02-10)
+> from [OpenMarine/MacArthur-HAT](https://github.com/OpenMarine/MacArthur-HAT).
+> The schematic includes a level-shifting circuit designed to handle the
+> 5 V / 3.3 V mismatch described here.  Whether that circuit is correctly
+> populated on a given physical board is the key variable — see
+> [Level-shifting circuit](#level-shifting-circuit-v12-schematic) below.
 
 ## Hardware Configuration
 
@@ -22,21 +23,74 @@ High receive error count (REC) on the MCP2518FD after transmission attempts. Oth
 | TXD/RXD coupling | 0 Ω resistors |
 | STBY | GND (normal/active mode) |
 
-## Root Cause: Voltage Mismatch on RXD
+## Level-shifting circuit (v1.2 schematic)
 
-The **MCP2562** (non-FD variant) is a 5 V logic device. Its RXD output swings to VDD (5 V) for a recessive bit. The **MCP2518FD** is a 3.3 V device with 3.3 V-rated inputs.
+The v1.2 schematic shows that the design **does** account for the 5 V / 3.3 V
+mismatch between the MCP2562 (VDD = 5 V) and the MCP2518FD (VDD = 3.3 V).
+Two buffer ICs bridge the logic levels:
 
-The CAN protocol requires every transmitting node to read back its own transmitted bits via the TXD→bus→RXD loopback path and compare them against what was sent. On every recessive bit looped back:
+| IC | Part | Power | Direction | Net names |
+|----|------|-------|-----------|-----------|
+| U9 | 74LVC1G125 | +3V3 | 5 V → 3.3 V | `CAN_RX` → `CAN_RX_3V3` |
+| U10 | 74AHCT1G125 | +5V | 3.3 V → 5 V | `CAN_TX_3V3` → `CAN_TX` |
+
+The MCP2518FD is wired exclusively to the `_3V3` nets; the MCP2562 is wired
+exclusively to the 5 V nets.  The buffers are the bridge.
+
+### 0 Ω resistor configuration
+
+Two signal paths exist and are selected by which 0 Ω resistors are populated:
+
+| Resistors | Path | Use when |
+|-----------|------|----------|
+| R29, R30, R31 (+ C3) | **Direct** — `CAN_TX_3V3` tied to `CAN_TX`, `CAN_RX` tied to `CAN_RX_3V3` with no buffering | CAN driver has 3.3 V I/O (e.g. TJA1462A) |
+| R33 + R35 | **Level-shifted** — enables U9 (OE active-low) and U10 for RX and TX respectively | **CAN driver has 5 V I/O (MCP2562)** |
+
+Schematic note (verbatim):
+> *Level-shifting for NMEA2000: Populate only when using CAN drivers with 5 V I/O*
+> *Do not populate R29, R30, R31, C3 for 5 V CAN driver*
+> *Populate R33, R35 when using 74xxx1G125 (OE low)*
+
+**If a board ships with R29/R30/R31 populated (direct path) and U9/U10 not
+fitted, the level-shifting circuit is bypassed entirely.** This is the
+assembly state that produces the failure described below.
+
+### MCP2562 Vio pin (pin 5)
+
+The MCP2562 has a VIO logic-supply reference pin.  If VIO is tied to +3V3,
+the RXD output swings to 3.3 V rather than 5 V, and TXD input thresholds
+become 3.3 V-compatible — which alone would eliminate the mismatch without
+external buffers.  The schematic does not show VIO explicitly tied to +3V3;
+the design relies on U9/U10 for level shifting instead.
+
+**Physical board verification** — measure U2 pin 5 to GND with a multimeter:
+- 3.3 V → VIO is tied to +3V3; RXD is 3.3 V-compatible; TX may work without U9/U10.
+- 5 V or floating → VIO is at VDD or undriven; the board depends on U9/U10.
+
+---
+
+## Root Cause: Voltage Mismatch on RXD (when level-shifting is absent)
+
+When the direct path is active (R29/R30/R31 populated, U9/U10 absent or
+disabled) and VIO is not at 3.3 V:
+
+The **MCP2562** RXD output swings to VDD (5 V) for a recessive bit. The
+**MCP2518FD** RXCAN input is rated for 3.3 V.
+
+The CAN protocol requires every transmitting node to read back its own
+transmitted bits via the TXD→bus→RXD loopback path. On every recessive bit
+looped back:
 
 1. MCP2518FD drives TXD high (recessive)
 2. MCP2562 drives bus recessive, RXD output → **5 V**
-3. 5 V is applied to the MCP2518FD RXD input, exceeding its 3.3 V rating
+3. 5 V is applied to the MCP2518FD RXCAN input, exceeding its 3.3 V rating
 4. Input protection diodes clamp and conduct; edge timing is distorted
 5. Controller samples an ambiguous or wrong bit value at the sample point
 6. Bit Error declared → error frame transmitted → **TEC += 8**
 7. All other nodes see the error frame → **REC += 1** per node per error
 
-This manifests as a high REC specifically during and after TX attempts, because the loopback path is only active when the node is transmitting.
+This manifests as a high REC specifically during and after TX attempts, because
+the loopback path is only active when the node is transmitting.
 
 ## Secondary Factor: Non-FD Transceiver with FD Controller
 
@@ -82,7 +136,33 @@ ip link show can0
 
 ## Fix
 
-### Permanent (next board spin)
+### Step 0 — Check what is actually on your board
+
+Before reworking anything, determine which signal path is active:
+
+1. Check whether U9 (74LVC1G125) and U10 (74AHCT1G125) are fitted.
+2. Check whether R29, R30, R31 are populated (0 Ω links).
+3. Measure voltage on U2 pin 5 (MCP2562 VIO) relative to GND.
+
+If U9/U10 are fitted and R29/R30/R31 are absent, the board is assembled
+correctly per the schematic and TX should work.  Investigate software
+configuration (bitrate, FD mode, socketcan) before assuming a hardware fault.
+
+If R29/R30/R31 are populated and U9/U10 are absent or have their OE pins
+floating high (disabled), the direct path is active and the voltage mismatch
+applies.  Proceed to the fixes below.
+
+### Option A — Enable the on-board level-shifting circuit
+
+If U9 and U10 are fitted but not enabled:
+
+1. Populate R33 and R35 with 0 Ω links to pull U9's OE pin low (74LVC1G125,
+   OE active-low).
+2. Remove R29, R30, R31 to break the direct path.
+3. Verify: `ip -s link show can0` should show zero or near-zero error counts
+   after a TX burst.
+
+### Option B (next board spin) — Replace MCP2562 with MCP2562FD
 
 Replace **MCP2562** with **MCP2562FD**. The MCP2562FD is pin-compatible except for the added VIO pin:
 
@@ -90,7 +170,7 @@ Replace **MCP2562** with **MCP2562FD**. The MCP2562FD is pin-compatible except f
 - All other pins are identical
 - Supports up to 8 Mbps, loop delay symmetry specified, fully characterized for use with CAN FD controllers
 
-### Workaround on Existing Hardware
+### Option C — RXD voltage divider (workaround on existing hardware)
 
 A resistor voltage divider on the RXD line (MCP2562 output → MCP2518FD input) can reduce the 5 V recessive level to ~3 V. This is fragile and not recommended for production use. The MCP2562FD is the correct fix.
 
